@@ -1,0 +1,32 @@
+{
+  "name": "http2nostr",
+  "version": "0.1.0",
+  "description": "A simple http proxy that forwards all requests as nostr direct-messages",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "bin": {
+    "http2nostr": "index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/oren-z0/http2nostr.git"
+  },
+  "keywords": [
+    "nostr",
+    "http",
+    "proxy"
+  ],
+  "author": "Oren <orenz0@protonmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/oren-z0/http2nostr/issues"
+  },
+  "homepage": "https://github.com/oren-z0/http2nostr#readme",
+  "dependencies": {
+    "@rust-nostr/nostr-sdk": "^0.13.1",
+    "commander": "^12.0.0"
+  }
+}
