@@ -1,17 +1,20 @@
 # http2nostr
 A simple http proxy that forwards all requests as nostr direct-messages.
 
-Execute directly with npx: `npx http2nostr -- [options] <destination>`.
+Execute directly with npx: `npx http2nostr [options] <destination>`.
+Alternatively, you can install http2nostr globally with: `npm i -g http2nostr`, and then run `http2nostr [options] <destination>` directly.
 
 For example:
 ```
-npx http2nostr -- --verbose --nsec-file ~/my-nsec.txt --save-nsec --relays wss://relay.damus.io wss://nos.lol wss://relay.snort.social wss://nostr.wine -p 8080 <server-npub>
+npx http2nostr --verbose --nsec-file ~/my-nsec.txt --save-nsec --relays wss://relay.damus.io wss://nos.lol wss://relay.snort.social wss://nostr.wine -p 8080 <server-npub>
 ```
 
 ```
+$ npx http2nostr --help
+
 Usage: http2nostr [options] <destination>
 
-A simple http proxy that forwards all requests as nostr direct-messages.
+A simple http proxy that forwards all requests as nostr direct`-messages.
 
 Arguments:
   destination                      Destination npub
