@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 const { runServer } = require('./lib/server');
 
 exports.runServer = runServer;
@@ -7,7 +8,7 @@ if (require.main === module) {
   program
     .name('http2nostr')
     .description('A simple http proxy that forwards all requests as nostr direct-messages.')
-    .version('0.1.0')
+    .version('0.1.1')
 
   program
     .option(
