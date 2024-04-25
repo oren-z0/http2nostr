@@ -8,7 +8,7 @@ if (require.main === module) {
   program
     .name('http2nostr')
     .description('A simple http proxy that forwards all requests as nostr direct-messages.')
-    .version('0.1.1')
+    .version('0.2.0')
 
   program
     .option(
