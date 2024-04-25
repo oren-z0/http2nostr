@@ -38,10 +38,14 @@ https://nodejs.org/api/http.html#httpcreateserveroptions-requestlistener).`,
       'If the nsec file was not found, generate a random nsec and save it in the same path.',
     )
     .option('--timeout <timeout>', 'Timeout in milliseconds', 300000)
+    .option(
+      '--destination <destination>',
+      'All requests will be sent to this destination npub. If not defined, the requests will be\
+ sent according to the X-Nostr-Destination header (and the header is removed).',
+    )
     .option('-v, --verbose', 'Verbose logs')
-    .argument('destination', 'Destination npub')
     .parse();
 
-  runServer(program.args[0], program.opts());
+  runServer(program.opts());
 }
 
