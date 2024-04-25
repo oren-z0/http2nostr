@@ -12,12 +12,9 @@ npx http2nostr --verbose --nsec-file ~/my-nsec.txt --save-nsec --relays wss://re
 ```
 $ npx http2nostr --help
 
-Usage: http2nostr [options] <destination>
+Usage: http2nostr [options]
 
-A simple http proxy that forwards all requests as nostr direct`-messages.
-
-Arguments:
-  destination                      Destination npub
+A simple http proxy that forwards all requests as nostr direct-messages.
 
 Options:
   -V, --version                    output the version number
@@ -32,6 +29,8 @@ Options:
   --nsec-file <filename>           Send nostr message from this nsec (by default generate a random nsec on each execution)
   --save-nsec                      If the nsec file was not found, generate a random nsec and save it in the same path.
   --timeout <timeout>              Timeout in milliseconds (default: 300000)
+  --destination <destination>      All requests will be sent to this destination npub. If not defined, the requests will be sent according to the X-Nostr-Destination
+                                   header (and the header is removed).
   -v, --verbose                    Verbose logs
   --help                           display help for command
 ```
