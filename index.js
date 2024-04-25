@@ -13,7 +13,7 @@ if (require.main === module) {
 
   program
     .option(
-      '--nodejs-http-options [options]',
+      '--nodejs-http-options <options>',
       `A json object of options for the http.createServer function (see: \
 https://nodejs.org/api/http.html#httpcreateserveroptions-requestlistener).`,
       '{}',
