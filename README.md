@@ -6,7 +6,7 @@ Alternatively, you can install http2nostr globally with: `npm i -g http2nostr`, 
 
 For example:
 ```
-npx http2nostr --verbose --nsec-file ~/my-nsec.txt --save-nsec --relays wss://relay.damus.io wss://nos.lol wss://relay.snort.social wss://nostr.wine -p 8080 <server-npub>
+npx http2nostr --verbose --nsec-file ~/my-nsec.txt --save-nsec --relays wss://relay.damus.io wss://nos.lol wss://relay.snort.social wss://nostr.wine -p 8080
 ```
 
 ```
