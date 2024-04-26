@@ -51,6 +51,12 @@ https://nodejs.org/api/http.html#httpcreateserveroptions-requestlistener).`,
       'All requests will be sent to this destination npub. If not defined, the requests will be\
  sent according to the X-Nostr-Destination header (and the header is removed).',
     )
+    .option(
+      '--exit-on-file-change',
+      'Exit when the files in --relays-file or --nsec-file change by an external process. Useful\
+ to reboot the server when those configuration change (don\'t forget to start the process again\
+ after it dies, using docker-compose configuration or some other way).',
+    )
     .option('-v, --verbose', 'Verbose logs')
     .parse();
 
