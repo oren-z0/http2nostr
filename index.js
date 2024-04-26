@@ -25,9 +25,16 @@ https://nodejs.org/api/http.html#httpcreateserveroptions-requestlistener).`,
       '--exclusive <exclusive>',
       'Exclusive (see: https://nodejs.org/api/net.html#serverlisten)',
     )
-    .requiredOption(
+    .option(
       '--relays <relays...>',
       'A list of relays to use for the nostr direct-messages.',
+    )
+    .option(
+      '--relays-file <filename>',
+      'A file to read the relays from. If both --relays and --relays-file are defined and the file\
+ exists, only the file will be used. If the file doesn\'t exist or empty, it will be created with\
+ the relays given in the --relays option (i.e. the --relays option represents "default relays" in\
+ this case). The relays in the file should be separated by space or new-lines.',
     )
     .option('--keep-host', 'Keep the Host header of the http request (by default it is removed).')
     .option(
