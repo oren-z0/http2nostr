@@ -1,6 +1,10 @@
 # http2nostr
 A simple http proxy that forwards all requests as nostr direct-messages.
 
+**This package is very useful together with [nostr2http](https://github.com/oren-z0/nostr2http)
+for accessing http servers that run in different local networks (behind
+[NAT](https://en.wikipedia.org/wiki/Network_address_translation)).**
+
 Execute directly with npx: `npx http2nostr [options]`.
 Alternatively, you can install http2nostr globally with: `npm i -g http2nostr`, and then run `http2nostr [options]` directly.
 
