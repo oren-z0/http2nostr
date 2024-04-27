@@ -1,8 +1,8 @@
 # http2nostr
 A simple http proxy that forwards all requests as nostr direct-messages.
 
-Execute directly with npx: `npx http2nostr [options] <destination>`.
-Alternatively, you can install http2nostr globally with: `npm i -g http2nostr`, and then run `http2nostr [options] <destination>` directly.
+Execute directly with npx: `npx http2nostr [options]`.
+Alternatively, you can install http2nostr globally with: `npm i -g http2nostr`, and then run `http2nostr [options]` directly.
 
 For example:
 ```
