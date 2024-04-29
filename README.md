@@ -38,6 +38,8 @@ Options:
   --timeout <timeout>              Timeout in milliseconds (default: 300000)
   --destination <destination>      All requests will be sent to this destination npub/nprofile. If not defined, the requests will be sent according to the
                                    X-Nostr-Destination header (and the header is removed).
+  --max-cached-relays <number>     When the x-nostr-destination is an NIP-19 nprofile, the server will attempt to connect to the relay hints in the nprofile, and will keep
+                                   connections to these relays up to this limit. (default: 10)
   --exit-on-file-change            Exit when the files in --relays-file or --nsec-file change by an external process. Useful to reboot the server when those configuration
                                    change (don't forget to start the process again after it dies, using docker-compose configuration or some other way).
   -v, --verbose                    Verbose logs

@@ -52,6 +52,12 @@ https://nodejs.org/api/http.html#httpcreateserveroptions-requestlistener).`,
  will be sent according to the X-Nostr-Destination header (and the header is removed).',
     )
     .option(
+      '--max-cached-relays <number>',
+      'When the x-nostr-destination is an NIP-19 nprofile, the server will attempt to connect to\
+ the relay hints in the nprofile, and will keep connections to these relays up to this limit.',
+      10,
+    )
+    .option(
       '--exit-on-file-change',
       'Exit when the files in --relays-file or --nsec-file change by an external process. Useful\
  to reboot the server when those configuration change (don\'t forget to start the process again\
