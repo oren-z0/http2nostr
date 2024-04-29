@@ -27,6 +27,7 @@
   "homepage": "https://github.com/oren-z0/http2nostr#readme",
   "dependencies": {
     "@rust-nostr/nostr-sdk": "^0.13.1",
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "p-limit": "^3.1.0"
   }
 }
