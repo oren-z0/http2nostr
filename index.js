@@ -48,8 +48,8 @@ https://nodejs.org/api/http.html#httpcreateserveroptions-requestlistener).`,
     .option('--timeout <timeout>', 'Timeout in milliseconds', 300000)
     .option(
       '--destination <destination>',
-      'All requests will be sent to this destination npub. If not defined, the requests will be\
- sent according to the X-Nostr-Destination header (and the header is removed).',
+      'All requests will be sent to this destination npub/nprofile. If not defined, the requests\
+ will be sent according to the X-Nostr-Destination header (and the header is removed).',
     )
     .option(
       '--exit-on-file-change',
