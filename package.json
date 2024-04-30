@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "start": "node index.js",
+    "docker:build": "docker buildx build --platform linux/arm64,linux/amd64 --tag orenz0/http2nostr:latest --tag orenz0/http2nostr:v$(node -p \"require('./package.json').version\") . --output \"type=registry\""
   },
   "bin": {
     "http2nostr": "index.js"
