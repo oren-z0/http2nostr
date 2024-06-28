@@ -1,15 +1,15 @@
-#!/usr/bin/env node
-const { runServer } = require('./lib/server');
+import process from 'node:process';
+import {program} from 'commander';
+import esMain from 'es-main';
+import {runServer, RunServerOptions} from './server.js';
 
-exports.runServer = runServer;
+export {runServer, RunServerOptions};
 
-if (require.main === module) {
-  const { program } = require('commander');
-  const { version } = require('./package');
+if (esMain(import.meta)) {
   program
     .name('http2nostr')
     .description('A simple http proxy that forwards all requests as nostr direct-messages.')
-    .version(version)
+    .version(process.env.npm_package_version ?? 'unknown')
 
   program
     .option(
