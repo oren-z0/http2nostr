@@ -63,7 +63,7 @@ interface ReadWriteRelaysOptions {
   destination?: string;
 }
 
-function readWriteRelays({relays, relaysFile, destination}: ReadWriteRelaysOptions): string[] {
+function _readWriteRelays({relays, relaysFile, destination}: ReadWriteRelaysOptions): string[] {
   if (relaysFile && existsSync(relaysFile)) {
     const relaysFromFile = readFileSync(relaysFile).toString().split(/\s+/).filter(Boolean);
     if (relaysFromFile.length > 0) {
@@ -84,6 +84,11 @@ function readWriteRelays({relays, relaysFile, destination}: ReadWriteRelaysOptio
   }
   const profileRelays = (decodedDestination.data.relays ?? []).filter(relay => !relaysFromOption.includes(relay));
   return [...relaysFromOption, ...profileRelays];
+}
+
+function readWriteRelays(options: ReadWriteRelaysOptions): string[] {
+  const allRelays = _readWriteRelays(options).map(normalizeURL);
+  return allRelays.filter((relay, index) => index === allRelays.indexOf(relay));
 }
 
 function getPublicKeyFromDestination(destination: string): string {
@@ -183,7 +188,7 @@ export async function runServer(options: RunServerOptions) {
       }
     }, 600_000),
   ];
-  const initialRelayUrls = readWriteRelays(options).map(normalizeURL);
+  const initialRelayUrls = readWriteRelays(options);
   let pool: SimplePool | undefined;
   let poolSubscription: SubCloser | undefined;
 
