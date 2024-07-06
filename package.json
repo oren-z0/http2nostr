@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "http2nostr",
-  "version": "0.3.2",
+  "version": "1.0.0",
   "description": "A simple http proxy that forwards all requests as nostr direct-messages",
   "exports": "./dist/index.js",
   "scripts": {
