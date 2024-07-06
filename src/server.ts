@@ -117,20 +117,25 @@ async function getRelaysStatuses(pool: SimplePool, relayUrls: string[]): Promise
 
 interface RequestMessage {
   id: string;
-  url: string;
-  method: string;
-  headers: Record<string, string>;
+  partIndex: number;
+  parts: number;
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
   bodyBase64: string;
 }
 
 interface ResponseMessage {
   id: string;
-  status: number;
-  headers: Record<string, string>;
+  partIndex: number;
+  parts: number;
+  status?: number;
+  headers?: Record<string, string>;
   bodyBase64: string;
 }
 
 interface PendingResponse {
+  responseMessages: Map<number, ResponseMessage>;
   timeout: NodeJS.Timeout;
   response: http.ServerResponse<http.IncomingMessage>;
   onClose: () => void;
@@ -283,24 +288,32 @@ export async function runServer(options: RunServerOptions) {
         if (!responseMessage || typeof responseMessage !== 'object') {
           throw new Error('Unexpected content type');
         }
-        const {id, status, headers, bodyBase64} = responseMessage;
+        const {id, partIndex, parts, status, headers, bodyBase64} = responseMessage;
         if (!id || typeof id !== 'string' || id.length > 100) {
           throw new Error('Unexpected type for field: id');
         }
-        if (!Number.isSafeInteger(status)) {
-          throw new Error('Unexpected type for field: status');
+        if (!Number.isSafeInteger(partIndex) || partIndex < 0) {
+          throw new Error('Unexpected type for field: partIndex');
         }
-        if (!headers || typeof headers !== 'object' || Object.values(headers).some(v => typeof v !== 'string')) {
-          throw new Error('Unexpected type for field: headers');
+        if (!Number.isSafeInteger(parts) || parts < 1) {
+          throw new Error('Unexpected type for field: partIndex');
         }
         if (typeof bodyBase64 !== 'string') {
           throw new Error('Unexpected type for field: bodyBase64');
+        }
+        if (partIndex === 0) {
+          if (!Number.isSafeInteger(status)) {
+            throw new Error('Unexpected type for field: status');
+          }
+          if (!headers || typeof headers !== 'object' || Object.values(headers).some(v => typeof v !== 'string')) {
+            throw new Error('Unexpected type for field: headers');
+          }
         }
       } catch (err) {
         console.error('Failed to handle event', err);
         return;
       }
-      const logPrefix = `${responseEvent.id}:${JSON.stringify(responseMessage.id)}`;
+      const logPrefix = `${responseEvent.id}:${JSON.stringify(responseMessage.id)}:${responseMessage.partIndex}/${responseMessage.parts}`;
       console.info(`${logPrefix}: ${nip19.npubEncode(responseSeal.pubkey)} ${JSON.stringify(responseMessage.status)}`);
       const responseFullId = `${responseMessage.id}:${responseSeal.pubkey}`;
       const pendingResponse = pendingResponses.get(responseFullId);
@@ -308,14 +321,34 @@ export async function runServer(options: RunServerOptions) {
         verboseLog(`${logPrefix}: No pending response`);
         return;
       }
+      pendingResponse.responseMessages.set(responseMessage.partIndex, responseMessage);
+      if (pendingResponse.responseMessages.size < responseMessage.parts) {
+        return;
+      }
       pendingResponses.delete(responseFullId);
       clearTimeout(pendingResponse.timeout);
       try {
+        const firstResponseMessage = pendingResponse.responseMessages.get(0);
+        if (!firstResponseMessage) {
+          throw new Error('Malformed response sequence');
+        }
+        let body: Buffer;
+        try {
+          body = Buffer.from(
+            Array.from({length: responseMessage.parts})
+              .map((_, index) => pendingResponse.responseMessages.get(index)?.bodyBase64 ?? '')
+              .join(''),
+            'base64'
+          );
+        } catch (error) {
+          console.error(`${logPrefix}: malformed base64 body sequence`, error);
+          throw new Error('Malformed base64 body sequence');
+        }
         pendingResponse.response.writeHead(
-          responseMessage.status,
-          typeof responseMessage.headers === 'object' ? responseMessage.headers : {}
+          firstResponseMessage.status!,
+          typeof firstResponseMessage.headers === 'object' ? firstResponseMessage.headers : {}
         );
-        pendingResponse.response.end(Buffer.from(responseMessage.bodyBase64, 'base64'));
+        pendingResponse.response.end(body);
       } catch (error) {
         console.error(`${logPrefix}: failed to send response`, error);
       }
@@ -501,6 +534,7 @@ export async function runServer(options: RunServerOptions) {
     };
 
     pendingResponses.set(fullId, {
+      responseMessages: new Map(),
       timeout: setTimeout(() => {
         console.error(`${fullId}: Request timed out`);
         try {
@@ -521,93 +555,109 @@ export async function runServer(options: RunServerOptions) {
     });
     req.on('end', async () => {
       try {
-        const requestMessage: RequestMessage = {
-          id,
-          headers: Object.fromEntries(
-            Object.entries(headers).map(([headerName, headerValue]) => [
-              headerName,
-              Array.isArray(headerValue) ? headerValue[0] : headerValue ?? '',
-            ])
-          ),
-          method: req.method ?? '',
-          url: req.url ?? '',
-          bodyBase64: Buffer.concat(bodyChunks).toString('base64'),
-        };
-        const stringifiedRequestMessage = JSON.stringify(requestMessage);
-        verboseLog(`${fullId}: Sending request: ${stringifiedRequestMessage}`);
-        const now = Math.floor(Date.now() / 1000);
-        const unsignedRequest: UnsignedEvent = {
-          kind: HttpRequestKind,
-          tags: [],
-          content: stringifiedRequestMessage,
-          created_at: now,
-          pubkey: publicKey,
-        };
-        const finalUnsignedRequestStringified = JSON.stringify({
-          ...unsignedRequest,
-          id: getEventHash(unsignedRequest),
-        });
-        verboseLog(`${fullId}: final unsigned request: ${finalUnsignedRequestStringified}`);
-        const requestSeal = finalizeEvent(
-          {
-            created_at: now - randomInt(0, 48 * 3600),
-            kind: SealKind,
-            tags: [],
-            content: nip44.encrypt(
-              finalUnsignedRequestStringified,
-              nip44.getConversationKey(secretKey, destinationPublicKey)
-            ),
-          },
-          secretKey
-        );
-        verboseLog(`${fullId}: request seal: ${JSON.stringify(requestSeal)}`);
-        const randomPrivateKey = generateSecretKey();
-        verboseLog(`${fullId}: random public key: ${getPublicKey(randomPrivateKey)}`);
-        const safeRelays = [...initialRelayUrls, ...hintRelays].filter(relay => {
-          const parsedRelay = new URL(relay);
-          // Don't publish relay addresses that might contain sensitive information
-          return !parsedRelay.username && !parsedRelay.password && !parsedRelay.search;
-        });
-        const requestEvent = finalizeEvent(
-          {
-            created_at: now,
-            kind: EphemeralGiftWrapKind,
-            tags: [
-              ['p', destinationPublicKey, ...safeRelays.slice(0, 1)],
-              ...(safeRelays.length > 1 ? [['relays', ...safeRelays.slice(1)]] : []),
-            ],
-            content: nip44.encrypt(
-              JSON.stringify(requestSeal),
-              nip44.getConversationKey(randomPrivateKey, destinationPublicKey)
-            ),
-          },
-          randomPrivateKey
-        );
-        verboseLog(`${fullId}: publishing request event: ${JSON.stringify(requestEvent)}`);
-        // Ugly code, but its the only way I found to log which relay caused the problem.
-        await Promise.all(
-          initialRelayUrls.map(async initialRelayUrl => {
-            if (!pool) {
-              return;
-            }
-            try {
-              verboseLog(`${fullId}: publishing to pool relay ${initialRelayUrl}`);
-              await Promise.all(pool.publish([initialRelayUrl], requestEvent));
-            } catch (error) {
-              console.error(`${fullId}: Failed to publish request to initial relay ${initialRelayUrl}`, error);
-            }
-          })
-        );
-        // Publishing to all cached relays, not only the hint relays.
-        for (const relay of cachedRelays) {
-          try {
-            verboseLog(`${fullId}: publishing to cached relay ${relay.relay.url}`);
-            await relay.relay.publish(requestEvent);
-          } catch (error) {
-            console.error(`${fullId}: failed to publish request to realy ${relay.relay.url}`, error);
+        const bodyBase64 = Buffer.concat(bodyChunks).toString('base64');
+        const bodyBase64Chunks: [string, number][] = [];
+        if (bodyBase64 === '') {
+          bodyBase64Chunks.push(['', 0]);
+        } else {
+          for (let partIndex = 0; partIndex * 32768 < bodyBase64.length; partIndex += 1) {
+            bodyBase64Chunks.push([bodyBase64.slice(partIndex * 32768, (partIndex + 1) * 32768), partIndex]);
           }
         }
-        console.info(`${fullId}: done`);
+        for (const [bodyBase64Chunk, partIndex] of bodyBase64Chunks) {
+          const logPrefix = `${fullId}:${partIndex}:${bodyBase64Chunks.length}`;
+          const requestMessage: RequestMessage = {
+            id,
+            partIndex,
+            parts: bodyBase64Chunks.length,
+            bodyBase64: bodyBase64Chunk,
+            ...(partIndex === 0 && {
+              headers: Object.fromEntries(
+                Object.entries(headers).map(([headerName, headerValue]) => [
+                  headerName,
+                  Array.isArray(headerValue) ? headerValue[0] : headerValue ?? '',
+                ])
+              ),
+              method: req.method ?? '',
+              url: req.url ?? '',
+            }),
+          };
+          const stringifiedRequestMessage = JSON.stringify(requestMessage);
+          verboseLog(`${logPrefix}: Sending request: ${stringifiedRequestMessage}`);
+          const now = Math.floor(Date.now() / 1000);
+          const unsignedRequest: UnsignedEvent = {
+            kind: HttpRequestKind,
+            tags: [],
+            content: stringifiedRequestMessage,
+            created_at: now,
+            pubkey: publicKey,
+          };
+          const finalUnsignedRequestStringified = JSON.stringify({
+            ...unsignedRequest,
+            id: getEventHash(unsignedRequest),
+          });
+          verboseLog(`${logPrefix}: final unsigned request: ${finalUnsignedRequestStringified}`);
+          const requestSeal = finalizeEvent(
+            {
+              created_at: now - randomInt(0, 48 * 3600),
+              kind: SealKind,
+              tags: [],
+              content: nip44.encrypt(
+                finalUnsignedRequestStringified,
+                nip44.getConversationKey(secretKey, destinationPublicKey)
+              ),
+            },
+            secretKey
+          );
+          verboseLog(`${logPrefix}: request seal: ${JSON.stringify(requestSeal)}`);
+          const randomPrivateKey = generateSecretKey();
+          verboseLog(`${logPrefix}: random public key: ${getPublicKey(randomPrivateKey)}`);
+          const safeRelays = [...initialRelayUrls, ...hintRelays].filter(relay => {
+            const parsedRelay = new URL(relay);
+            // Don't publish relay addresses that might contain sensitive information
+            return !parsedRelay.username && !parsedRelay.password && !parsedRelay.search;
+          });
+          const requestEvent = finalizeEvent(
+            {
+              created_at: now,
+              kind: EphemeralGiftWrapKind,
+              tags: [
+                ['p', destinationPublicKey, ...safeRelays.slice(0, 1)],
+                ...(safeRelays.length > 1 ? [['relays', ...safeRelays.slice(1)]] : []),
+              ],
+              content: nip44.encrypt(
+                JSON.stringify(requestSeal),
+                nip44.getConversationKey(randomPrivateKey, destinationPublicKey)
+              ),
+            },
+            randomPrivateKey
+          );
+          verboseLog(`${logPrefix}: publishing request event: ${JSON.stringify(requestEvent)}`);
+          // Ugly code, but its the only way I found to log which relay caused the problem.
+          await Promise.all(
+            initialRelayUrls.map(async initialRelayUrl => {
+              if (!pool) {
+                return;
+              }
+              try {
+                verboseLog(`${logPrefix}: publishing to pool relay ${initialRelayUrl}`);
+                await Promise.all(pool.publish([initialRelayUrl], requestEvent));
+              } catch (error) {
+                console.error(`${logPrefix}: Failed to publish request to initial relay ${initialRelayUrl}`, error);
+              }
+            })
+          );
+          // Publishing to all cached relays, not only the hint relays.
+          for (const relay of cachedRelays) {
+            try {
+              verboseLog(`${logPrefix}: publishing to cached relay ${relay.relay.url}`);
+              await relay.relay.publish(requestEvent);
+            } catch (error) {
+              console.error(`${logPrefix}: failed to publish request to realy ${relay.relay.url}`, error);
+            }
+          }
+          console.info(`${logPrefix}: done`);
+        }
       } catch (err) {
         console.error('Failed to send nostr message:', err);
         res.writeHead(500);
