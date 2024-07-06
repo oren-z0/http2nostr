@@ -14,7 +14,7 @@
     "fix": "eslint . --fix"
   },
   "bin": {
-    "http2nostr": "index.js"
+    "http2nostr": "./dist/index.js"
   },
   "engines": {
     "node": ">=20.12.2"
