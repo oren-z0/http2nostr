@@ -1,8 +1,8 @@
 {
   "type": "module",
   "name": "http2nostr",
-  "version": "1.1.0",
-  "description": "A simple http proxy that forwards all requests as nostr direct-messages",
+  "version": "1.2.0",
+  "description": "A simple http proxy that forwards all requests as a new kind of nostr events",
   "exports": "./dist/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
