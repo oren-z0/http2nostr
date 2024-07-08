@@ -27,6 +27,10 @@ const SealKind = 13;
 const HttpRequestKind = 80;
 const HttpResponseKind = 81;
 
+// NIP-44 limits the size of the encrypted content to 64k. Limiting the body size to 32k
+// will leave enough room for the request headers, method, etc.
+const partBodyMaxSize = 32768;
+
 function writeFile(filename: string, payload: string): void {
   const dirname = path.dirname(filename);
   if (!existsSync(dirname)) {
@@ -314,7 +318,7 @@ export async function runServer(options: RunServerOptions) {
         return;
       }
       const logPrefix = `${responseEvent.id}:${JSON.stringify(responseMessage.id)}:${responseMessage.partIndex}/${responseMessage.parts}`;
-      console.info(`${logPrefix}: ${nip19.npubEncode(responseSeal.pubkey)} ${JSON.stringify(responseMessage.status)}`);
+      verboseLog(`${logPrefix}: ${nip19.npubEncode(responseSeal.pubkey)} part received.`);
       const responseFullId = `${responseMessage.id}:${responseSeal.pubkey}`;
       const pendingResponse = pendingResponses.get(responseFullId);
       if (!pendingResponse) {
@@ -332,18 +336,12 @@ export async function runServer(options: RunServerOptions) {
         if (!firstResponseMessage) {
           throw new Error('Malformed response sequence');
         }
-        let body: Buffer;
-        try {
-          body = Buffer.from(
-            Array.from({length: responseMessage.parts})
-              .map((_, index) => pendingResponse.responseMessages.get(index)?.bodyBase64 ?? '')
-              .join(''),
-            'base64'
-          );
-        } catch (error) {
-          console.error(`${logPrefix}: malformed base64 body sequence`, error);
-          throw new Error('Malformed base64 body sequence');
-        }
+        console.info(`${logPrefix}: ${nip19.npubEncode(responseSeal.pubkey)} ${firstResponseMessage.status}`);
+        const body = Buffer.concat(
+          Array.from({length: responseMessage.parts}).map((_, index) =>
+            Buffer.from(pendingResponse.responseMessages.get(index)?.bodyBase64 ?? '', 'base64')
+          )
+        );
         pendingResponse.response.writeHead(
           firstResponseMessage.status!,
           typeof firstResponseMessage.headers === 'object' ? firstResponseMessage.headers : {}
@@ -555,13 +553,16 @@ export async function runServer(options: RunServerOptions) {
     });
     req.on('end', async () => {
       try {
-        const bodyBase64 = Buffer.concat(bodyChunks).toString('base64');
+        const body = Buffer.concat(bodyChunks);
         const bodyBase64Chunks: [string, number][] = [];
-        if (bodyBase64 === '') {
+        if (body.length === 0) {
           bodyBase64Chunks.push(['', 0]);
         } else {
-          for (let partIndex = 0; partIndex * 32768 < bodyBase64.length; partIndex += 1) {
-            bodyBase64Chunks.push([bodyBase64.slice(partIndex * 32768, (partIndex + 1) * 32768), partIndex]);
+          for (let partIndex = 0; partIndex * partBodyMaxSize < body.length; partIndex += 1) {
+            bodyBase64Chunks.push([
+              body.subarray(partIndex * partBodyMaxSize, (partIndex + 1) * partBodyMaxSize).toString('base64'),
+              partIndex,
+            ]);
           }
         }
         for (const [bodyBase64Chunk, partIndex] of bodyBase64Chunks) {
