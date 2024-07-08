@@ -27,9 +27,21 @@ const SealKind = 13;
 const HttpRequestKind = 80;
 const HttpResponseKind = 81;
 
-// NIP-44 limits the size of the encrypted content to 64k. Limiting the body size to 32k
-// will leave enough room for the request headers, method, etc.
-const partBodyMaxSize = 32768;
+// NIP-44 limits the size of the encrypted content to 64k. We want to split the body of the http
+// request to chunks small enough so they could be encoded in base64, joined with other
+// metadata (request method & headers), and encrypted twice: first for the seal, and then for
+// the gift-wrap (the first encyption adds an overhead that should be considered in the second
+// encryption).
+const partBodyMaxSize = 16384;
+const acceptableDelaySeconds = 60;
+const acceptableFutureGapSeconds = 600;
+const handledResponseIdsCleanupIntervalMs = 600_000;
+const messageIdMaxLength = 100;
+const creationTimeRandomizationSeconds = 48 * 3600;
+const resubscribeIntervalMs = 3_600_000;
+const firstRelayConnectionTimeMs = 1000;
+const secondaryRelayConnectionTimeMs = 5000;
+const exitTimeoutSeconds = 10;
 
 function writeFile(filename: string, payload: string): void {
   const dirname = path.dirname(filename);
@@ -189,13 +201,13 @@ export async function runServer(options: RunServerOptions) {
   const handledResponseIds = new Map<string, number>();
   const intervals = [
     setInterval(() => {
-      oldestTime = Date.now() / 1000 - 60; // up to 1 minute delay
+      oldestTime = Date.now() / 1000 - acceptableDelaySeconds;
       for (const [requestId, requestTime] of [...handledResponseIds.entries()]) {
         if (requestTime < oldestTime) {
           handledResponseIds.delete(requestId);
         }
       }
-    }, 600_000),
+    }, handledResponseIdsCleanupIntervalMs),
   ];
   const initialRelayUrls = readWriteRelays(options);
   let pool: SimplePool | undefined;
@@ -234,7 +246,12 @@ export async function runServer(options: RunServerOptions) {
   const onevent = async (responseEvent: NostrEvent): Promise<void> => {
     handledEventTimes.set(responseEvent.id, responseEvent.created_at);
     try {
-      verboseLog(`${responseEvent.id}: Received event: ${JSON.stringify(responseEvent)}`);
+      verboseLog(
+        `${responseEvent.id}: Received event: ${JSON.stringify({
+          ...responseEvent,
+          content: '...',
+        })}, content-size: ${responseEvent.content.length}`
+      );
       if (responseEvent.kind !== EphemeralGiftWrapKind) {
         return;
       }
@@ -245,8 +262,14 @@ export async function runServer(options: RunServerOptions) {
           responseEvent.content,
           nip44.getConversationKey(secretKey, responseEvent.pubkey)
         );
-        verboseLog(`${responseEvent.id}: Decrypted seal: ${JSON.stringify(decryptedSeal)}`);
+        verboseLog(`${responseEvent.id}: Decrypted seal-size: ${decryptedSeal.length}`);
         responseSeal = JSON.parse(decryptedSeal);
+        verboseLog(
+          `${responseEvent.id}: Response seal: ${JSON.stringify({
+            ...responseSeal,
+            content: '...',
+          })}, content-size: ${responseSeal.content.length}`
+        );
         if (responseSeal.kind !== SealKind) {
           return;
         }
@@ -258,9 +281,10 @@ export async function runServer(options: RunServerOptions) {
           responseSeal.content,
           nip44.getConversationKey(secretKey, responseSeal.pubkey)
         );
-        verboseLog(`${responseEvent.id}: Decrypted content: ${JSON.stringify(decryptedContent)}`);
+        verboseLog(`${responseEvent.id}: Decrypted content-size: ${decryptedContent.length}`);
         const unsignedResponse: Omit<NostrEvent, 'sig'> = JSON.parse(decryptedContent);
         if (unsignedResponse.kind !== HttpResponseKind) {
+          verboseLog(`${responseEvent.id}: Invalid kind ${unsignedResponse.kind}`);
           return;
         }
         if (unsignedResponse.pubkey !== responseSeal.pubkey) {
@@ -279,7 +303,7 @@ export async function runServer(options: RunServerOptions) {
           verboseLog(`${responseEvent.id}: Old event`);
           return;
         }
-        if (Date.now() / 1000 + 600 < unsignedResponse.created_at) {
+        if (Date.now() / 1000 + acceptableFutureGapSeconds < unsignedResponse.created_at) {
           verboseLog(`${responseEvent.id}: Future event`);
           return;
         }
@@ -293,7 +317,7 @@ export async function runServer(options: RunServerOptions) {
           throw new Error('Unexpected content type');
         }
         const {id, partIndex, parts, status, headers, bodyBase64} = responseMessage;
-        if (!id || typeof id !== 'string' || id.length > 100) {
+        if (!id || typeof id !== 'string' || id.length > messageIdMaxLength) {
           throw new Error('Unexpected type for field: id');
         }
         if (!Number.isSafeInteger(partIndex) || partIndex < 0) {
@@ -375,7 +399,7 @@ export async function runServer(options: RunServerOptions) {
 
   intervals.push(
     setInterval(() => {
-      const since = Math.ceil(Date.now() / 1000) - 48 * 3600;
+      const since = Math.ceil(Date.now() / 1000) - creationTimeRandomizationSeconds;
       const newSubsription = poolSubscribe(since);
       poolSubscription?.close();
       poolSubscription = newSubsription;
@@ -398,19 +422,19 @@ export async function runServer(options: RunServerOptions) {
           handledEventTimes.delete(eventId);
         }
       }
-    }, 3_600_000)
+    }, resubscribeIntervalMs)
   );
 
   if (initialRelayUrls.length > 0) {
     pool = new SimplePool();
     verboseLog('Connecting to initial relays');
-    poolSubscription = poolSubscribe(Math.ceil(Date.now() / 1000) - 48 * 3600);
+    poolSubscription = poolSubscribe(Math.ceil(Date.now() / 1000) - creationTimeRandomizationSeconds);
 
-    await sleep(1000);
+    await sleep(firstRelayConnectionTimeMs);
     let relaysStatuses = await getRelaysStatuses(pool, initialRelayUrls);
     if (relaysStatuses.every(status => !status.isConnected)) {
       // wait some more
-      await sleep(5000);
+      await sleep(secondaryRelayConnectionTimeMs);
       relaysStatuses = await getRelaysStatuses(pool, initialRelayUrls);
       if (relaysStatuses.every(status => !status.isConnected)) {
         console.error('Failed to connect to any of the relays.');
@@ -474,7 +498,7 @@ export async function runServer(options: RunServerOptions) {
                 const newSubscription = newRelay.subscribe(
                   [
                     {
-                      since: Math.ceil(Date.now() / 1000) - 48 * 3600,
+                      since: Math.ceil(Date.now() / 1000) - creationTimeRandomizationSeconds,
                       kinds: [EphemeralGiftWrapKind],
                       '#p': [publicKey],
                     },
@@ -583,24 +607,35 @@ export async function runServer(options: RunServerOptions) {
               url: req.url ?? '',
             }),
           };
-          const stringifiedRequestMessage = JSON.stringify(requestMessage);
-          verboseLog(`${logPrefix}: Sending request: ${stringifiedRequestMessage}`);
+          const requestMessageStringified = JSON.stringify(requestMessage);
+          verboseLog(
+            `${logPrefix}: Sending request: ${JSON.stringify({
+              ...requestMessage,
+              bodyBase64: '...',
+            })}, bodyBase64-size: ${requestMessage.bodyBase64.length}, total-size: ${requestMessageStringified.length}`
+          );
           const now = Math.floor(Date.now() / 1000);
           const unsignedRequest: UnsignedEvent = {
             kind: HttpRequestKind,
             tags: [],
-            content: stringifiedRequestMessage,
+            content: requestMessageStringified,
             created_at: now,
             pubkey: publicKey,
           };
-          const finalUnsignedRequestStringified = JSON.stringify({
+          const finalUnsignedRequest = {
             ...unsignedRequest,
             id: getEventHash(unsignedRequest),
-          });
-          verboseLog(`${logPrefix}: final unsigned request: ${finalUnsignedRequestStringified}`);
+          };
+          const finalUnsignedRequestStringified = JSON.stringify(finalUnsignedRequest);
+          verboseLog(
+            `${logPrefix}: final unsigned request: ${JSON.stringify({
+              ...finalUnsignedRequest,
+              content: '...',
+            })}, content-size: ${finalUnsignedRequest.content.length}, total-size: ${finalUnsignedRequestStringified.length}`
+          );
           const requestSeal = finalizeEvent(
             {
-              created_at: now - randomInt(0, 48 * 3600),
+              created_at: now - randomInt(0, creationTimeRandomizationSeconds),
               kind: SealKind,
               tags: [],
               content: nip44.encrypt(
@@ -610,7 +645,13 @@ export async function runServer(options: RunServerOptions) {
             },
             secretKey
           );
-          verboseLog(`${logPrefix}: request seal: ${JSON.stringify(requestSeal)}`);
+          const requestSealStringified = JSON.stringify(requestSeal);
+          verboseLog(
+            `${logPrefix}: request seal: ${JSON.stringify({
+              ...requestSeal,
+              conetnt: '...',
+            })}, content-size: ${requestSeal.content.length}, total-size: ${requestSealStringified.length}`
+          );
           const randomPrivateKey = generateSecretKey();
           verboseLog(`${logPrefix}: random public key: ${getPublicKey(randomPrivateKey)}`);
           const safeRelays = [...initialRelayUrls, ...hintRelays].filter(relay => {
@@ -627,13 +668,18 @@ export async function runServer(options: RunServerOptions) {
                 ...(safeRelays.length > 1 ? [['relays', ...safeRelays.slice(1)]] : []),
               ],
               content: nip44.encrypt(
-                JSON.stringify(requestSeal),
+                requestSealStringified,
                 nip44.getConversationKey(randomPrivateKey, destinationPublicKey)
               ),
             },
             randomPrivateKey
           );
-          verboseLog(`${logPrefix}: publishing request event: ${JSON.stringify(requestEvent)}`);
+          verboseLog(
+            `${logPrefix}: publishing request event: ${JSON.stringify({
+              ...requestEvent,
+              content: '...',
+            })}, content-size: ${requestEvent.content.length}`
+          );
           // Ugly code, but its the only way I found to log which relay caused the problem.
           await Promise.all(
             initialRelayUrls.map(async initialRelayUrl => {
@@ -680,9 +726,9 @@ export async function runServer(options: RunServerOptions) {
   );
   const exit = () => {
     setTimeout(() => {
-      console.error('Failed to close connections after 10 seconds');
+      console.error(`Failed to close connections after ${exitTimeoutSeconds} seconds`);
       process.exit(-1);
-    }, 10_000).unref();
+    }, exitTimeoutSeconds * 1000).unref();
     if (pool) {
       pool.close(initialRelayUrls);
       pool = undefined;
